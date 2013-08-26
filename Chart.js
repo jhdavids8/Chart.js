@@ -813,6 +813,9 @@ window.Chart = function(context){
 		function activeDataPointHandler(event) {
 			var mouse_on_point = false;
 
+			var offsetX = event.hasOwnProperty('offsetX') ? event.offsetX : event.layerX;
+			var offsetY = event.hasOwnProperty('offsetY') ? event.offsetY : event.layerY;
+
 			for (var k in data.datasets) {
 				var dataset = data.datasets[k];
 				if (dataset.mouseover) {
@@ -820,8 +823,8 @@ window.Chart = function(context){
 						var point = datasetPoints[k][i];
 						var bounds = (config.pointDotStrokeWidth / 2) + point.radius;
 						if (
-							event.offsetX >= point.x - bounds && event.offsetY >= point.y - bounds &&
-							event.offsetX <= point.x + bounds && event.offsetY <= point.y + bounds
+							offsetX >= point.x - bounds && offsetY >= point.y - bounds &&
+							offsetX <= point.x + bounds && offsetY <= point.y + bounds
 						) {
 							mouse_on_point = true;
 							if (hoveredPoint != point) {
