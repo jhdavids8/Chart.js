@@ -352,18 +352,13 @@ window.Chart = function(context){
 	};
 
 	var PolarArea = function(data,config,ctx){
-		var maxSize, scaleHop, calculatedScale, labelHeight, scaleHeight, valueBounds, labelTemplateString;		
-		
-		
+		var maxSize, scaleHop, calculatedScale, labelHeight, scaleHeight, valueBounds, labelTemplateString;
+		var dataAreas = [], hoveredArea;		
 		calculateDrawingSizes();
-		
 		valueBounds = getValueBounds();
-
 		labelTemplateString = (config.scaleShowLabels)? config.scaleLabel : null;
-
-		//Check and set the scale
+		// Check and set the scale
 		if (!config.scaleOverride){
-			
 			calculatedScale = calculateScale(scaleHeight,valueBounds.maxSteps,valueBounds.minSteps,valueBounds.maxValue,valueBounds.minValue,labelTemplateString);
 		}
 		else {
@@ -375,25 +370,71 @@ window.Chart = function(context){
 			}
 			populateLabels(labelTemplateString, calculatedScale.labels,calculatedScale.steps,config.scaleStartValue,config.scaleStepWidth);
 		}
-		
 		scaleHop = maxSize/(calculatedScale.steps);
-
-		//Wrap in an animation loop wrapper
+		// Wrap in an animation loop wrapper
 		animationLoop(config,drawScale,drawAllSegments,ctx);
+		// Set up mouse/touch events
+		if (is_touch_device()) {
+			context.canvas.ontouchstart = function(e) {
+				e.offsetX = e.targetTouches[0].clientX - position.x;
+				e.offsetY = e.targetTouches[0].clientY - position.y;
+				activeAreaHandler(e);
+			}
+			context.canvas.ontouchmove = function(e) {
+				e.offsetX = e.targetTouches[0].clientX - position.x;
+				e.offsetY = e.targetTouches[0].clientY - position.y;
+				activeAreaHandler(e);
+			}
+		} else {
+			context.canvas.onmousemove = function(e) {
+				activeAreaHandler(e);
+			}
+		}
+
+		function activeAreaHandler(event) {
+			var offsetX = event.hasOwnProperty('offsetX') ? event.offsetX : event.layerX;
+			var offsetY = event.hasOwnProperty('offsetY') ? event.offsetY : event.layerY;
+			var mouse_on_area = false;
+			for (var i in data) {
+				var dataArea = dataAreas[i];
+				if (data[dataArea.areaIndex].mouseover && isPointInSector(offsetX, offsetY, dataArea)) {
+					mouse_on_area = true;
+					if (hoveredArea != dataArea) {
+						if (hoveredArea) {
+							// We jumped from one area to the next, so fire the mouseout first for that area
+							if (data[hoveredArea.areaIndex].mouseout) {
+								data[hoveredArea.areaIndex].mouseout({event: event, area: dataArea});
+							}
+						}
+						hoveredArea = dataArea;
+						data[dataArea.areaIndex].mouseover({event: event, area: dataArea});
+					}
+					break;
+				}
+			}
+			if (!mouse_on_area && hoveredArea) {
+				if (data[hoveredArea.areaIndex].mouseout) {
+					data[hoveredArea.areaIndex].mouseout({event: event, area: dataArea});
+				}
+				hoveredArea = null;
+			}
+			if (mouse_on_area) {
+				context.canvas.style.cursor = 'pointer';
+			} else {
+				context.canvas.style.cursor = 'default';
+			}
+		}
 
 		function calculateDrawingSizes(){
 			maxSize = (Min([width,height])/2);
 			//Remove whatever is larger - the font size or line width.
-			
 			maxSize -= Max([config.scaleFontSize*0.5,config.scaleLineWidth*0.5]);
-			
 			labelHeight = config.scaleFontSize*2;
 			//If we're drawing the backdrop - add the Y padding to the label height and remove from drawing region.
 			if (config.scaleShowLabelBackdrop){
 				labelHeight += (2 * config.scaleBackdropPaddingY);
 				maxSize -= config.scaleBackdropPaddingY*1.5;
 			}
-			
 			scaleHeight = maxSize;
 			//If the label height is less than 5, set it to 5 so we don't have lines on top of each other.
 			labelHeight = Default(labelHeight,5);
@@ -408,7 +449,6 @@ window.Chart = function(context){
 					ctx.lineWidth = config.scaleLineWidth;
 					ctx.stroke();
 				}
-
 				if (config.scaleShowLabels){
 					ctx.textAlign = "center";
 					ctx.font = config.scaleFontStyle + " " + config.scaleFontSize + "px " + config.scaleFontFamily;
@@ -432,6 +472,7 @@ window.Chart = function(context){
 				}
 			}
 		}
+
 		function drawAllSegments(animationDecimal){
 			var startAngle = -Math.PI/2,
 			angleStep = (Math.PI*2)/data.length,
@@ -445,16 +486,32 @@ window.Chart = function(context){
 					rotateAnimation = animationDecimal;
 				}
 			}
-
 			for (var i=0; i<data.length; i++){
-
+				var area = {
+					centerPoint: {
+						x: width/2,
+						y: height/2
+					},
+					radius: scaleAnimation * calculateOffset(data[i].value, calculatedScale, scaleHop),
+					startAngle: startAngle,
+					endAngle: startAngle + rotateAnimation*angleStep,
+					areaIndex: i
+				};
+				area.startPoint = {
+					x: area.radius*Math.cos(area.startAngle) + area.centerPoint.x,
+					y: area.radius*Math.sin(area.startAngle) + area.centerPoint.y
+				};
+				area.endPoint = {
+					x: area.radius*Math.cos(area.endAngle) + area.centerPoint.x,
+					y: area.radius*Math.sin(area.endAngle) + area.centerPoint.y
+				};
+				dataAreas[area.areaIndex] = area;
 				ctx.beginPath();
-				ctx.arc(width/2,height/2,scaleAnimation * calculateOffset(data[i].value,calculatedScale,scaleHop),startAngle, startAngle + rotateAnimation*angleStep, false);
-				ctx.lineTo(width/2,height/2);
+				ctx.arc(area.centerPoint.x, area.centerPoint.y, area.radius, area.startAngle, area.endAngle, false);
+				ctx.lineTo(area.centerPoint.x, area.centerPoint.y);
 				ctx.closePath();
 				ctx.fillStyle = data[i].color;
 				ctx.fill();
-
 				if(config.segmentShowStroke){
 					ctx.strokeStyle = config.segmentStrokeColor;
 					ctx.lineWidth = config.segmentStrokeWidth;
@@ -463,6 +520,7 @@ window.Chart = function(context){
 				startAngle += rotateAnimation*angleStep;
 			}
 		}
+
 		function getValueBounds() {
 			var upperValue = Number.MIN_VALUE;
 			var lowerValue = Number.MAX_VALUE;
@@ -470,18 +528,40 @@ window.Chart = function(context){
 				if (data[i].value > upperValue) {upperValue = data[i].value;}
 				if (data[i].value < lowerValue) {lowerValue = data[i].value;}
 			};
-
 			var maxSteps = Math.floor((scaleHeight / (labelHeight*0.66)));
 			var minSteps = Math.floor((scaleHeight / labelHeight*0.5));
-			
 			return {
 				maxValue : upperValue,
 				minValue : lowerValue,
 				maxSteps : maxSteps,
 				minSteps : minSteps
 			};
-			
+		}
 
+		function isPointInSector(x, y, areaData) {
+			var topV = {
+						x: areaData.startPoint.x - areaData.centerPoint.x,
+						y: areaData.centerPoint.y - areaData.startPoint.y,
+					},
+					botV = {
+						x: areaData.endPoint.x - areaData.centerPoint.x,
+						y: areaData.centerPoint.y - areaData.endPoint.y,
+					},
+			    relV = {
+		    		x: x - areaData.centerPoint.x,
+    				y: areaData.centerPoint.y - y
+		  		};
+		  return !areClockwise(botV, relV) &&
+         areClockwise(topV, relV) &&
+         isWithinRadius(relV, Math.pow(areaData.radius, 2));
+
+		  function areClockwise(v1, v2) {
+  			return -v1.x*v2.y + v1.y*v2.x > 0;
+			}
+
+			function isWithinRadius(v, radiusSquared) {
+ 			  return v.x*v.x + v.y*v.y <= radiusSquared;
+			}
 		}
 	}
 
